@@ -1,23 +1,10 @@
 """
 Gold Trading Signal Bot
 =======================
-A Telegram bot that analyzes gold trading signals from public channels.
+Reads the last 20 messages from specified Telegram public channels and
+analyzes them for gold (XAUUSD) buy/sell signals.
 
-Send /analyze to the bot to get buy/sell percentages and overall market bias.
-
-SETUP REQUIRED:
-1. Get a Bot Token:
-   - Open Telegram and message @BotFather
-   - Send /newbot, follow the steps, and copy your BOT_TOKEN
-
-2. Get Telethon API credentials (needed to read channels):
-   - Go to https://my.telegram.org and log in
-   - Click "API development tools" → create an app
-   - Copy your API_ID and API_HASH
-
-3. Fill in all four values below, then run:
-      python3 gold_signals.py
-   On first run, Telegram will send a code to your phone — enter it in the terminal.
+Send /analyze to the bot to receive buy/sell percentages and overall market bias.
 """
 
 import asyncio
@@ -36,10 +23,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN  = ""   # <-- BotFather token, e.g. "7123456789:AAF..."
-API_ID     = 0    # <-- Telethon API ID (integer)
-API_HASH   = ""   # <-- Telethon API Hash (string)
-PHONE_NUMBER = "" # <-- Your Telegram phone number, e.g. "+1234567890"
+BOT_TOKEN    = ""                            # <-- Paste your BotFather token here
+API_ID       = 34781021
+API_HASH     = "be4e092a72583bbe9c938ab614924070"
+PHONE_NUMBER = "+972567238399"
 
 CHANNELS = [
     "eisaaq",
@@ -51,7 +38,7 @@ CHANNELS = [
 
 MESSAGES_PER_CHANNEL = 20
 
-BUY_KEYWORDS = ["شراء", "buy", "long", "صعود", "ارتفاع"]
+BUY_KEYWORDS  = ["شراء", "buy", "long", "صعود", "ارتفاع"]
 SELL_KEYWORDS = ["بيع", "sell", "short", "هبوط", "انخفاض"]
 
 
@@ -126,9 +113,9 @@ def build_reply(data: dict) -> str:
             buy_pct = sell_pct = 0.0
 
         lines.append(
-            f"@{name}  ({ch['messages']} msgs)\n"
-            f"  🟢 Buy: {ch['buy']} ({buy_pct:.0f}%)  "
-            f"🔴 Sell: {ch['sell']} ({sell_pct:.0f}%)  "
+            f"@{name}  \\({ch['messages']} msgs\\)\n"
+            f"  🟢 Buy: {ch['buy']} \\({buy_pct:.0f}%\\)  "
+            f"🔴 Sell: {ch['sell']} \\({sell_pct:.0f}%\\)  "
             f"🟡 Mixed: {ch['mixed']}"
         )
 
@@ -144,9 +131,9 @@ def build_reply(data: dict) -> str:
         buy_pct  = t["buy"]   / grand_signal * 100
         sell_pct = t["sell"]  / grand_signal * 100
         mix_pct  = t["mixed"] / grand_signal * 100
-        lines.append(f"🟢 Buy:   {t['buy']} ({buy_pct:.1f}%)")
-        lines.append(f"🔴 Sell:  {t['sell']} ({sell_pct:.1f}%)")
-        lines.append(f"🟡 Mixed: {t['mixed']} ({mix_pct:.1f}%)")
+        lines.append(f"🟢 Buy:   {t['buy']} \\({buy_pct:.1f}%\\)")
+        lines.append(f"🔴 Sell:  {t['sell']} \\({sell_pct:.1f}%\\)")
+        lines.append(f"🟡 Mixed: {t['mixed']} \\({mix_pct:.1f}%\\)")
 
         lines.append("")
         if buy_pct > sell_pct:
@@ -156,20 +143,9 @@ def build_reply(data: dict) -> str:
         else:
             lines.append("⚖️ *Bias: NEUTRAL* — Equal buy and sell signals")
     else:
-        lines.append("No trading signals found in recent messages.")
+        lines.append("No trading signals found in recent messages\\.")
 
     return "\n".join(lines)
-
-
-async def cmd_analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text("🔍 Analyzing channels, please wait...")
-    try:
-        data  = await fetch_signals()
-        reply = build_reply(data)
-        await update.message.reply_text(reply, parse_mode=ParseMode.MARKDOWN)
-    except Exception as e:
-        logger.exception("Error during analysis")
-        await update.message.reply_text(f"❌ Error: {e}")
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -180,21 +156,32 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
+async def cmd_analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text("🔍 Analyzing channels, please wait...")
+    try:
+        data  = await fetch_signals()
+        reply = build_reply(data)
+        await update.message.reply_text(reply, parse_mode=ParseMode.MARKDOWN_V2)
+    except Exception as e:
+        logger.exception("Error during analysis")
+        await update.message.reply_text(f"❌ Error: {e}")
+
+
 def main() -> None:
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start",   cmd_start))
     app.add_handler(CommandHandler("analyze", cmd_analyze))
-    logger.info("Bot is running. Send /analyze to your bot.")
+    logger.info("Bot is running. Send /analyze to your bot on Telegram.")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
 if __name__ == "__main__":
-    if not BOT_TOKEN or API_ID == 0 or not API_HASH or not PHONE_NUMBER:
+    if not BOT_TOKEN:
         print(
-            "ERROR: Please fill in BOT_TOKEN, API_ID, API_HASH, and PHONE_NUMBER "
-            "at the top of the script.\n"
-            "  • Bot token  → @BotFather on Telegram\n"
-            "  • API credentials → https://my.telegram.org"
+            "ERROR: BOT_TOKEN is empty.\n"
+            "  1. Message @BotFather on Telegram\n"
+            "  2. Send /newbot and follow the steps\n"
+            "  3. Paste the token into BOT_TOKEN at the top of this file"
         )
     else:
         main()
