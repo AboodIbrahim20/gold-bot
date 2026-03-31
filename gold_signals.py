@@ -1,24 +1,45 @@
 """
-Gold Trading Signal Analyzer using Telethon
-============================================
-Reads the last 20 messages from specified Telegram public channels and
-analyzes them for gold (XAUUSD) buy/sell signals.
+Gold Trading Signal Bot
+=======================
+A Telegram bot that analyzes gold trading signals from public channels.
+
+Send /analyze to the bot to get buy/sell percentages and overall market bias.
 
 SETUP REQUIRED:
-1. Go to https://my.telegram.org and log in
-2. Click "API development tools"
-3. Create a new application to get your API_ID and API_HASH
-4. Fill in API_ID, API_HASH, and PHONE_NUMBER below
+1. Get a Bot Token:
+   - Open Telegram and message @BotFather
+   - Send /newbot, follow the steps, and copy your BOT_TOKEN
+
+2. Get Telethon API credentials (needed to read channels):
+   - Go to https://my.telegram.org and log in
+   - Click "API development tools" → create an app
+   - Copy your API_ID and API_HASH
+
+3. Fill in all four values below, then run:
+      python3 gold_signals.py
+   On first run, Telegram will send a code to your phone — enter it in the terminal.
 """
 
 import asyncio
+import logging
 import re
+
 from telethon import TelegramClient
 from telethon.tl.types import Message
+from telegram import Update
+from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram.constants import ParseMode
 
-API_ID = 0           # <-- Replace with your API ID (integer)
-API_HASH = ""        # <-- Replace with your API Hash (string)
-PHONE_NUMBER = ""    # <-- Replace with your phone number (e.g. "+1234567890")
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO,
+)
+logger = logging.getLogger(__name__)
+
+BOT_TOKEN  = ""   # <-- BotFather token, e.g. "7123456789:AAF..."
+API_ID     = 0    # <-- Telethon API ID (integer)
+API_HASH   = ""   # <-- Telethon API Hash (string)
+PHONE_NUMBER = "" # <-- Your Telegram phone number, e.g. "+1234567890"
 
 CHANNELS = [
     "eisaaq",
@@ -30,21 +51,8 @@ CHANNELS = [
 
 MESSAGES_PER_CHANNEL = 20
 
-BUY_KEYWORDS = [
-    "شراء",
-    "buy",
-    "long",
-    "صعود",
-    "ارتفاع",
-]
-
-SELL_KEYWORDS = [
-    "بيع",
-    "sell",
-    "short",
-    "هبوط",
-    "انخفاض",
-]
+BUY_KEYWORDS = ["شراء", "buy", "long", "صعود", "ارتفاع"]
+SELL_KEYWORDS = ["بيع", "sell", "short", "هبوط", "انخفاض"]
 
 
 def contains_keyword(text: str, keywords: list[str]) -> bool:
@@ -57,121 +65,136 @@ def contains_keyword(text: str, keywords: list[str]) -> bool:
 
 
 def classify_message(text: str) -> str | None:
-    is_buy = contains_keyword(text, BUY_KEYWORDS)
+    is_buy  = contains_keyword(text, BUY_KEYWORDS)
     is_sell = contains_keyword(text, SELL_KEYWORDS)
-
     if is_buy and is_sell:
         return "mixed"
-    elif is_buy:
+    if is_buy:
         return "buy"
-    elif is_sell:
+    if is_sell:
         return "sell"
     return None
 
 
-async def analyze_channels():
+async def fetch_signals() -> dict:
+    """Use Telethon to read channels and return signal counts."""
     client = TelegramClient("gold_session", API_ID, API_HASH)
-
     await client.start(phone=PHONE_NUMBER)
-    print("Connected to Telegram\n")
-    print("=" * 60)
 
-    total_buy = 0
-    total_sell = 0
-    total_mixed = 0
-    total_neutral = 0
-    total_messages = 0
+    results = []
+    total = {"buy": 0, "sell": 0, "mixed": 0, "neutral": 0, "messages": 0}
 
     for channel in CHANNELS:
-        channel_buy = 0
-        channel_sell = 0
-        channel_mixed = 0
-        channel_neutral = 0
-        messages_fetched = 0
-
-        print(f"\nChannel: @{channel}")
-        print("-" * 40)
-
+        counts = {"buy": 0, "sell": 0, "mixed": 0, "neutral": 0, "messages": 0, "error": None}
         try:
             entity = await client.get_entity(channel)
-            async for message in client.iter_messages(entity, limit=MESSAGES_PER_CHANNEL):
-                if not isinstance(message, Message) or not message.text:
+            async for msg in client.iter_messages(entity, limit=MESSAGES_PER_CHANNEL):
+                if not isinstance(msg, Message) or not msg.text:
                     continue
-
-                messages_fetched += 1
-                signal = classify_message(message.text)
-
-                if signal == "buy":
-                    channel_buy += 1
-                    print(f"  [BUY]     {message.text[:80].strip()!r}")
-                elif signal == "sell":
-                    channel_sell += 1
-                    print(f"  [SELL]    {message.text[:80].strip()!r}")
-                elif signal == "mixed":
-                    channel_mixed += 1
-                    print(f"  [MIXED]   {message.text[:80].strip()!r}")
-                else:
-                    channel_neutral += 1
-
-            channel_total = channel_buy + channel_sell + channel_mixed + channel_neutral
-            signal_total = channel_buy + channel_sell + channel_mixed
-
-            if signal_total > 0:
-                buy_pct = channel_buy / signal_total * 100
-                sell_pct = channel_sell / signal_total * 100
-                mixed_pct = channel_mixed / signal_total * 100
-            else:
-                buy_pct = sell_pct = mixed_pct = 0.0
-
-            print(f"\n  Messages scanned : {channel_total}")
-            print(f"  Signal messages  : {signal_total}")
-            print(f"  Buy signals      : {channel_buy}  ({buy_pct:.1f}%)")
-            print(f"  Sell signals     : {channel_sell}  ({sell_pct:.1f}%)")
-            print(f"  Mixed signals    : {channel_mixed}  ({mixed_pct:.1f}%)")
-
-            total_buy += channel_buy
-            total_sell += channel_sell
-            total_mixed += channel_mixed
-            total_neutral += channel_neutral
-            total_messages += channel_total
+                counts["messages"] += 1
+                signal = classify_message(msg.text)
+                counts[signal or "neutral"] += 1
 
         except Exception as e:
-            print(f"  ERROR: Could not read @{channel}: {e}")
+            counts["error"] = str(e)
+            logger.warning("Could not read @%s: %s", channel, e)
 
-    print("\n" + "=" * 60)
-    print("OVERALL SUMMARY — ALL CHANNELS")
-    print("=" * 60)
-
-    grand_signal_total = total_buy + total_sell + total_mixed
-
-    if grand_signal_total > 0:
-        grand_buy_pct = total_buy / grand_signal_total * 100
-        grand_sell_pct = total_sell / grand_signal_total * 100
-        grand_mixed_pct = total_mixed / grand_signal_total * 100
-    else:
-        grand_buy_pct = grand_sell_pct = grand_mixed_pct = 0.0
-
-    print(f"Total messages scanned : {total_messages}")
-    print(f"Total signal messages  : {grand_signal_total}")
-    print(f"Total buy signals      : {total_buy}  ({grand_buy_pct:.1f}%)")
-    print(f"Total sell signals     : {total_sell}  ({grand_sell_pct:.1f}%)")
-    print(f"Total mixed signals    : {total_mixed}  ({grand_mixed_pct:.1f}%)")
-
-    if grand_signal_total > 0:
-        print("\n--- SIGNAL DIRECTION ---")
-        if grand_buy_pct > grand_sell_pct:
-            print(f"Overall bias: BULLISH (Buy {grand_buy_pct:.1f}% vs Sell {grand_sell_pct:.1f}%)")
-        elif grand_sell_pct > grand_buy_pct:
-            print(f"Overall bias: BEARISH (Sell {grand_sell_pct:.1f}% vs Buy {grand_buy_pct:.1f}%)")
-        else:
-            print("Overall bias: NEUTRAL (Buy and Sell signals are equal)")
+        results.append({"channel": channel, **counts})
+        for key in ("buy", "sell", "mixed", "neutral", "messages"):
+            total[key] += counts[key]
 
     await client.disconnect()
+    return {"channels": results, "total": total}
+
+
+def build_reply(data: dict) -> str:
+    lines = ["📊 *Gold Trading Signal Analysis*\n"]
+    lines.append(f"Channels scanned: {len(data['channels'])}")
+    lines.append(f"Messages per channel: {MESSAGES_PER_CHANNEL}\n")
+
+    for ch in data["channels"]:
+        name = ch["channel"]
+        if ch["error"]:
+            lines.append(f"@{name}: ❌ {ch['error']}")
+            continue
+
+        signal_total = ch["buy"] + ch["sell"] + ch["mixed"]
+        if signal_total > 0:
+            buy_pct  = ch["buy"]  / signal_total * 100
+            sell_pct = ch["sell"] / signal_total * 100
+        else:
+            buy_pct = sell_pct = 0.0
+
+        lines.append(
+            f"@{name}  ({ch['messages']} msgs)\n"
+            f"  🟢 Buy: {ch['buy']} ({buy_pct:.0f}%)  "
+            f"🔴 Sell: {ch['sell']} ({sell_pct:.0f}%)  "
+            f"🟡 Mixed: {ch['mixed']}"
+        )
+
+    t = data["total"]
+    grand_signal = t["buy"] + t["sell"] + t["mixed"]
+
+    lines.append("\n─────────────────────")
+    lines.append("*Overall Summary*")
+    lines.append(f"Total messages: {t['messages']}")
+    lines.append(f"Signal messages: {grand_signal}")
+
+    if grand_signal > 0:
+        buy_pct  = t["buy"]   / grand_signal * 100
+        sell_pct = t["sell"]  / grand_signal * 100
+        mix_pct  = t["mixed"] / grand_signal * 100
+        lines.append(f"🟢 Buy:   {t['buy']} ({buy_pct:.1f}%)")
+        lines.append(f"🔴 Sell:  {t['sell']} ({sell_pct:.1f}%)")
+        lines.append(f"🟡 Mixed: {t['mixed']} ({mix_pct:.1f}%)")
+
+        lines.append("")
+        if buy_pct > sell_pct:
+            lines.append(f"📈 *Bias: BULLISH* — Buy {buy_pct:.1f}% vs Sell {sell_pct:.1f}%")
+        elif sell_pct > buy_pct:
+            lines.append(f"📉 *Bias: BEARISH* — Sell {sell_pct:.1f}% vs Buy {buy_pct:.1f}%")
+        else:
+            lines.append("⚖️ *Bias: NEUTRAL* — Equal buy and sell signals")
+    else:
+        lines.append("No trading signals found in recent messages.")
+
+    return "\n".join(lines)
+
+
+async def cmd_analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text("🔍 Analyzing channels, please wait...")
+    try:
+        data  = await fetch_signals()
+        reply = build_reply(data)
+        await update.message.reply_text(reply, parse_mode=ParseMode.MARKDOWN)
+    except Exception as e:
+        logger.exception("Error during analysis")
+        await update.message.reply_text(f"❌ Error: {e}")
+
+
+async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text(
+        "👋 Welcome to the Gold Signal Bot!\n\n"
+        "Send /analyze to scan Telegram channels for gold trading signals "
+        "and get buy/sell percentages with an overall market bias."
+    )
+
+
+def main() -> None:
+    app = Application.builder().token(BOT_TOKEN).build()
+    app.add_handler(CommandHandler("start",   cmd_start))
+    app.add_handler(CommandHandler("analyze", cmd_analyze))
+    logger.info("Bot is running. Send /analyze to your bot.")
+    app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
 if __name__ == "__main__":
-    if API_ID == 0 or not API_HASH or not PHONE_NUMBER:
-        print("ERROR: Please fill in API_ID, API_HASH, and PHONE_NUMBER at the top of the script.")
-        print("Get your credentials at: https://my.telegram.org")
+    if not BOT_TOKEN or API_ID == 0 or not API_HASH or not PHONE_NUMBER:
+        print(
+            "ERROR: Please fill in BOT_TOKEN, API_ID, API_HASH, and PHONE_NUMBER "
+            "at the top of the script.\n"
+            "  • Bot token  → @BotFather on Telegram\n"
+            "  • API credentials → https://my.telegram.org"
+        )
     else:
-        asyncio.run(analyze_channels())
+        main()
