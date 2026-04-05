@@ -1,3 +1,4 @@
+import os
 """
 Gold Trading Signal Bot
 =======================
@@ -28,7 +29,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN    = ""                                    # <-- Paste your BotFather token here
+BOT_TOKEN = os.environ.get('BOT_TOKEN', '')                                    # <-- Paste your BotFather token here
 API_ID       = 34781021
 API_HASH     = "be4e092a72583bbe9c938ab614924070"
 PHONE_NUMBER = "+972567238399"
