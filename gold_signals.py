@@ -1,4 +1,3 @@
-import os
 """
 Gold Trading Signal Bot
 =======================
@@ -14,6 +13,7 @@ SETUP:
   PHONE_NUMBER→ your Telegram phone number e.g. "+1234567890"
 """
 
+import asyncio
 import logging
 import re
 
@@ -29,7 +29,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN = os.environ.get('BOT_TOKEN', '')                                    # <-- Paste your BotFather token here
+BOT_TOKEN    = ""                                    # <-- Paste your BotFather token here
 API_ID       = 34781021
 API_HASH     = "be4e092a72583bbe9c938ab614924070"
 PHONE_NUMBER = "+972567238399"
@@ -164,15 +164,22 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
-async def cmd_analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text("🔍 Analyzing channels, please wait...")
+async def run_analysis(chat_id: int, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Background task: fetch signals and send result when ready."""
     try:
         data  = await fetch_signals()
         reply = build_reply(data)
-        await update.message.reply_text(reply, parse_mode=ParseMode.MARKDOWN)
+        await context.bot.send_message(chat_id=chat_id, text=reply, parse_mode=ParseMode.MARKDOWN)
     except Exception as e:
         logger.exception("Error during analysis")
-        await update.message.reply_text(f"❌ Error: {e}")
+        await context.bot.send_message(chat_id=chat_id, text=f"❌ Error: {e}")
+
+
+async def cmd_analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # Reply immediately so the bot doesn't time out on Render
+    await update.message.reply_text("جاري التحليل... ⏳")
+    # Fire analysis in the background — handler returns right away
+    asyncio.create_task(run_analysis(update.effective_chat.id, context))
 
 
 def main() -> None:
